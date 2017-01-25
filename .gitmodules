@@ -1,5 +1,5 @@
 [submodule "engine"]
 	path = engine
-	url = https://github.com/ReddogStone/vectory3d
+	url = https://reddogstone:Basilisk84@github.com/ReddogStone/jabaku
 	branch = master
 	ignore = all
