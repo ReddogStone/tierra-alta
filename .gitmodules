@@ -1,0 +1,5 @@
+[submodule "engine"]
+	path = engine
+	url = https://github.com/ReddogStone/vectory3d
+	branch = master
+	ignore = all
