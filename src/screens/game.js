@@ -18,8 +18,8 @@ let context = texCanvas.getContext('2d');
 context.fillStyle = 'white';
 context.fillRect(0, 0, texCanvas.width, texCanvas.height);
 context.fillStyle = 'black';
-context.fillRect(0.5 * texCanvas.width, 0, 0.5 * texCanvas.width, 0.5 * texCanvas.height);
-context.fillRect(0, 0.5 * texCanvas.height, 0.5 * texCanvas.width, 0.5 * texCanvas.height);
+context.fillRect(0.5 * texCanvas.width, 0, 0.3 * texCanvas.width, 0.3 * texCanvas.height);
+context.fillRect(0, 0.5 * texCanvas.height, 0.25 * texCanvas.width, 0.25 * texCanvas.height);
 
 const texture = engine.createTexture(texCanvas);
 
@@ -57,6 +57,8 @@ let grid = createRandomGrid(sx, sy, 0);
 let geometry = createTerrainGeometry(grid, 1);
 let mesh = Mesh.make(geometry);
 
+let keyState = {};
+
 // ================================================================================
 // RENDER
 // ================================================================================
@@ -87,11 +89,46 @@ let mesh = Mesh.make(geometry);
 // LOGIC
 // ================================================================================
 
-	let t = 0;
-	return Behavior.update(function(dt) {
-		t += dt;
-		// pos = vec3(Math.sin(t + 0.5) * 20, Math.cos(0.3 * t) * 10, 10);
+	const storeKeyState = (keyCode, property) => () => Behavior.run(function*() {
+		yield Behavior.filter(event =>
+			event.type === 'keydown' && event.event.keyCode === keyCode);
+		console.log(property);
+		keyState[property] = true;
+		yield Behavior.filter(event =>
+			event.type === 'keyup' && event.event.keyCode === keyCode);
+		keyState[property] = false;
 	});
+
+	let t = 0;
+	return Behavior.first(
+		Behavior.repeat(storeKeyState(37, 'left')),
+		Behavior.repeat(storeKeyState(38, 'up')),
+		Behavior.repeat(storeKeyState(39, 'right')),
+		Behavior.repeat(storeKeyState(40, 'down')),
+		Behavior.update(function(dt) {
+			t += dt;
+			// pos = vec3(Math.sin(t + 0.5) * 20, Math.cos(0.3 * t) * 10, 10);
+
+			let dir = vec3(0, 0, 0);
+			if (keyState.right) {
+				dir.add(vec3(1, -1, 0));
+			}
+			if (keyState.left) {
+				dir.add(vec3(-1, 1, 0));
+			}
+			if (keyState.up) {
+				dir.add(vec3(1, 1, 0));
+			}
+			if (keyState.down) {
+				dir.add(vec3(-1, -1, 0));
+			}
+			dir.normalize();
+
+			let dp = dir.clone().scale(dt);
+			pos.add(dp);
+			target.add(dp);
+		})
+	);
 };
 
 // ================================================================================
@@ -153,7 +190,7 @@ function writeCell(x, y, cell, innerRatio, vertices, indices, vertexOffset, inde
 	vi = writeCellVertex(cx - hir, cy - hir, 0, 0, 1, vertices, vi);
 	vi = writeCellVertex(cx + hir, cy - hir, 0, 1, 1, vertices, vi);
 	vi = writeCellVertex(cx - hir, cy + hir, 0, 0, 0, vertices, vi);
-	vi = writeCellVertex(cx + hir, cy + hir, 0, 0, 1, vertices, vi);
+	vi = writeCellVertex(cx + hir, cy + hir, 0, 1, 0, vertices, vi);
 
 	let startIndex = Math.floor(vertexOffset / 8);
 	let ii = indexOffset;
