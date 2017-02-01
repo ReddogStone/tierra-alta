@@ -14,14 +14,17 @@ document.body.appendChild(canvas);
 let engine = Engine3D(canvas, true);
 let Mesh = MeshLib(engine);
 
-let emptyCanvas = document.createElement('canvas');
-emptyCanvas.width = 1;
-emptyCanvas.height = 1;
-let context = emptyCanvas.getContext('2d');
+let texCanvas = document.createElement('canvas');
+texCanvas.width = 128;
+texCanvas.height = 128;
+let context = texCanvas.getContext('2d');
 context.fillStyle = 'white';
-context.fillRect(0, 0, emptyCanvas.width, emptyCanvas.height);
+context.fillRect(0, 0, texCanvas.width, texCanvas.height);
+context.fillStyle = 'black';
+context.fillRect(0.5 * texCanvas.width, 0, 0.5 * texCanvas.width, 0.5 * texCanvas.height);
+context.fillRect(0, 0.5 * texCanvas.height, 0.5 * texCanvas.width, 0.5 * texCanvas.height);
 
-const emptyTexture = engine.createTexture(emptyCanvas);
+const texture = engine.createTexture(texCanvas);
 
 const vertexShader = getFile('/engine/shaders/simple.vshader');
 const fragmentShader = getFile('/engine/shaders/simple.fshader');
@@ -41,7 +44,7 @@ engine.setBlendMode(BlendMode.SOLID);
 engine.setProgram(program, {
 	uProjection: projection.toArray(),
 
-	uTexture: { texture: emptyTexture },
+	uTexture: { texture: texture },
 	uColorLight1: [1, 1, 1],
 	uPosLight2: [0, 0, 0],
 	uColorLight2: [0, 0, 0],
@@ -59,24 +62,18 @@ requestAnimationFrame(function redraw() {
 
 function update() {
 	let t = performance.now() * 0.001;
-	// let sin = Math.sin(t);
-	// for (let i = 0; i < grid.cells.length; i++) {
-		// grid.cells[i].height = grid.cells[i].originalHeight * sin * sin;
-	// }
-
 	pos = vec3(Math.sin(t + 0.5) * 20, Math.cos(0.3 * t) * 10, 10);
 }
 
 let grid = createRandomGrid(sx, sy, 0);
+let geometry = createTerrainGeometry(grid, 1);
+let mesh = Mesh.make(geometry);
 
 function render() {
 	let t = performance.now() * 0.001;
 	let sin = Math.sin(t);
 
 	let view = mat4.lookAt(pos, target, up);
-
-	let geometry = createTerrainGeometry(grid, 0.75);
-	let mesh = Mesh.make(geometry);
 
 	let world = mat4();
 	let worldIT = world.clone().invert().transpose();
@@ -131,36 +128,6 @@ function createTerrainGeometry(grid, innerRatio) {
 		}
 	}
 
-	for (let y = 0; y < sy; y++) {
-		for (let x = 0; x < sx - 1; x++) {
-			let cell = cells[y * sx + x];
-			let rightCell = cells[y * sx + x + 1];
-			connectCells(x, y, cell, x + 1, y, rightCell, innerRatio,
-				vertices, indices, vertices.length, indices.length);
-		}
-	}
-
-	for (let y = 0; y < sy - 1; y++) {
-		for (let x = 0; x < sx; x++) {
-			let cell = cells[y * sx + x];
-			let topCell = cells[(y + 1) * sx + x];
-			connectCells(x, y, cell, x, y + 1, topCell, innerRatio,
-				vertices, indices, vertices.length, indices.length);
-		}
-	}
-
-	for (let y = 0; y < sy - 1; y++) {
-		for (let x = 0; x < sx - 1; x++) {
-			let cellsToConnect = [
-				cells[y * sx + x],
-				cells[y * sx + x + 1],
-				cells[(y + 1) * sx + x],
-				cells[(y + 1) * sx + x + 1]
-			];
-			addCorner(x, y, cellsToConnect, innerRatio, vertices, indices, vertices.length, indices.length);
-		}
-	}
-
 	return {
 		vertices: vertices,
 		indices: indices,
@@ -177,10 +144,10 @@ function writeCell(x, y, cell, innerRatio, vertices, indices, vertexOffset, inde
 	let cy = y + 0.5;
 	let hir = innerRatio * 0.5;
 	let vi = vertexOffset;
-	vi = writeCellVertex(cx - hir, cy - hir, cell.height, vertices, vi);
-	vi = writeCellVertex(cx + hir, cy - hir, cell.height, vertices, vi);
-	vi = writeCellVertex(cx - hir, cy + hir, cell.height, vertices, vi);
-	vi = writeCellVertex(cx + hir, cy + hir, cell.height, vertices, vi);
+	vi = writeCellVertex(cx - hir, cy - hir, 0, 0, 1, vertices, vi);
+	vi = writeCellVertex(cx + hir, cy - hir, 0, 1, 1, vertices, vi);
+	vi = writeCellVertex(cx - hir, cy + hir, 0, 0, 0, vertices, vi);
+	vi = writeCellVertex(cx + hir, cy + hir, 0, 0, 1, vertices, vi);
 
 	let startIndex = Math.floor(vertexOffset / 8);
 	let ii = indexOffset;
@@ -188,64 +155,16 @@ function writeCell(x, y, cell, innerRatio, vertices, indices, vertexOffset, inde
 	indices[ii++] = startIndex + 2; indices[ii++] = startIndex + 1; indices[ii++] = startIndex + 3;
 }
 
-function writeCellVertex(x, y, z, vertices, offset) {
-	let vi = offset;
-	vertices[vi++] = x; vertices[vi++] = y; vertices[vi++] = z;	
-	vertices[vi++] = 0; vertices[vi++] = 0; vertices[vi++] = 1;	
-	vertices[vi++] = 0; vertices[vi++] = 0;	
-	return offset + 8;
+function writeCellVertex(x, y, z, tu, tv, vertices, offset) {
+	return writeVertex(x, y, z, 0, 0, 1, tu, tv, vertices, offset);
 }
 
-function connectCells(x1, y1, cell1, x2, y2, cell2, innerRatio, vertices, indices, vertexOffset, indexOffset) {
-	let cx1 = x1 + 0.5;	let cy1 = y1 + 0.5;
-	let cx2 = x2 + 0.5;	let cy2 = y2 + 0.5;
-	let hir = innerRatio * 0.5;
-
-	let dx = cx2 - cx1;
-	let dy = cy2 - cy1;
-	let dh = cell1.height - cell2.height;
-
-	let vi = vertexOffset;
-	vi = writeVertex(cx1 + dx * hir - dy * hir, cy1 - dx * hir + dy * hir, cell1.height, dh * dx, dh * dy, 1, vertices, vi);
-	vi = writeVertex(cx2 - dx * hir - dy * hir, cy2 - dx * hir - dy * hir, cell2.height, dh * dx, dh * dy, 1, vertices, vi);
-	vi = writeVertex(cx1 + dx * hir + dy * hir, cy1 + dx * hir + dy * hir, cell1.height, dh * dx, dh * dy, 1, vertices, vi);
-	vi = writeVertex(cx2 - dx * hir + dy * hir, cy2 + dx * hir - dy * hir, cell2.height, dh * dx, dh * dy, 1, vertices, vi);
-
-	let startIndex = Math.floor(vertexOffset / 8);
-	let ii = indexOffset;
-	indices[ii++] = startIndex; indices[ii++] = startIndex + 1; indices[ii++] = startIndex + 2;
-	indices[ii++] = startIndex + 2; indices[ii++] = startIndex + 1; indices[ii++] = startIndex + 3;
-}
-
-function addCorner(x, y, cells, innerRatio, vertices, indices, vertexOffset, indexOffset) {
-	let cx1 = x + 0.5;	let cy1 = y + 0.5;
-	let cx2 = x + 1.5;	let cy2 = y + 0.5;
-	let cx3 = x + 0.5;	let cy3 = y + 1.5;
-	let cx4 = x + 1.5;	let cy4 = y + 1.5;
-	let hir = innerRatio * 0.5;
-
-	let d1 = vec3(cx4 - cx1, cy4 - cy1, cells[3].height - cells[0].height).normalize();
-	let d2 = vec3(cx3 - cx2, cy3 - cy2, cells[2].height - cells[1].height).normalize();
-	let n = d2.cross(d1);
-
-	let vi = vertexOffset;
-	vi = writeVertex(cx1 + hir, cy1 + hir, cells[0].height, n.x, n.y, n.z, vertices, vi);
-	vi = writeVertex(cx2 - hir, cy2 + hir, cells[1].height, n.x, n.y, n.z, vertices, vi);
-	vi = writeVertex(cx3 + hir, cy3 - hir, cells[2].height, n.x, n.y, n.z, vertices, vi);
-	vi = writeVertex(cx4 - hir, cy4 - hir, cells[3].height, n.x, n.y, n.z, vertices, vi);
-
-	let startIndex = Math.floor(vertexOffset / 8);
-	let ii = indexOffset;
-	indices[ii++] = startIndex; indices[ii++] = startIndex + 1; indices[ii++] = startIndex + 2;
-	indices[ii++] = startIndex + 2; indices[ii++] = startIndex + 1; indices[ii++] = startIndex + 3;
-}
-
-function writeVertex(x, y, z, nx, ny, nz, vertices, offset) {
+function writeVertex(x, y, z, nx, ny, nz, tu, tv, vertices, offset) {
 	let vi = offset;
 	let n = vec3(nx, ny, nz).normalize();
 	vertices[vi++] = x; vertices[vi++] = y; vertices[vi++] = z;	
 	vertices[vi++] = n.x; vertices[vi++] = n.y; vertices[vi++] = n.z;	
-	vertices[vi++] = 0; vertices[vi++] = 0;	
+	vertices[vi++] = tu; vertices[vi++] = tv;
 	return offset + 8;
 }
 

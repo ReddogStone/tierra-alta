@@ -1,4 +1,6 @@
 - Sanctuary (my home, where I rest)
 - Picking up stones/objects and drop them somewhere
 - Sun, Water, Temperature, Soil humidity, Soil quality
-- 
+
+01.02.2017:
+	- Let's make the graphics like in don't starve (pseudo-2D, isometric terrain with sprites)
