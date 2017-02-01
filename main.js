@@ -61,7 +61,7 @@ const loadScript = id => callback => {
 	script.onerror = function(error) {
 		if (done) { return; }
 		done = true;
-		callback(error);
+		callback(new Error('Could not load module: "' + id + '" requested by: "${id}"'));
 	};
 	document.head.appendChild(script);
 };
