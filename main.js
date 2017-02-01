@@ -16,7 +16,7 @@ http.createServer(stack([
 			console.log('Require:', request.url);
 			let parts = request.url.split('/').slice(2);
 			// parts = path.resolve(parts.join('/')).split('\\');
-			console.log('PARTS:', parts);
+			// console.log('PARTS:', parts);
 			let parent = parts.slice(0, -1).join('/');
 			let id = parts.join('/');
 
