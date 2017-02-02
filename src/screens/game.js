@@ -1,6 +1,7 @@
 'use strict';
 
 const MeshLib = require('../../engine/engine/mesh');
+const Geometry = require('../../engine/engine/geometry');
 const BlendMode = require('../../engine/engine/blend-mode');
 const mat4 = require('../../engine/math/Matrix4');
 const vec3 = require('../../engine/math/Vector3');
@@ -9,55 +10,74 @@ const Behavior = require('../logic/behavior');
 
 module.exports = function(engine, setRender) {
 
-const Mesh = MeshLib(engine);
+	const Mesh = MeshLib(engine);
 
-let texCanvas = document.createElement('canvas');
-texCanvas.width = 128;
-texCanvas.height = 128;
-let context = texCanvas.getContext('2d');
-context.fillStyle = 'white';
-context.fillRect(0, 0, texCanvas.width, texCanvas.height);
-context.fillStyle = 'black';
-context.fillRect(0.5 * texCanvas.width, 0, 0.3 * texCanvas.width, 0.3 * texCanvas.height);
-context.fillRect(0, 0.5 * texCanvas.height, 0.25 * texCanvas.width, 0.25 * texCanvas.height);
+	const texture = createTexture(engine, 128, 128, function(context, width, height) {
+		context.fillStyle = 'white';
+		context.fillRect(0, 0, width, height);
+		context.fillStyle = 'black';
+		context.fillRect(0.5 * width, 0, 0.3 * width, 0.3 * height);
+		context.fillRect(0, 0.5 * height, 0.25 * width, 0.25 * height);	
+	});
 
-const texture = engine.createTexture(texCanvas);
+	const playerTexture = createTexture(engine, 128, 128, function(context, width, height) {
+		context.fillStyle = 'silver';
+		context.beginPath();
+		context.arc(0.5 * width, 0.5 * height, 0.4 * width, 0, 2 * Math.PI);
+		context.fill();
 
-const vertexShader = getFile('/engine/shaders/simple.vshader');
-const fragmentShader = getFile('/engine/shaders/simple.fshader');
-const program = engine.createProgram(vertexShader, fragmentShader, 'simple');
+		context.fillStyle = 'black';
+		context.beginPath();
+		context.arc(0.3 * width, 0.4 * height, 0.08 * width, 0, 2 * Math.PI);
+		context.fill();
 
-const sx = 40;
-const sy = 40;
+		context.beginPath();
+		context.arc(0.7 * width, 0.4 * height, 0.08 * width, 0, 2 * Math.PI);
+		context.fill();
 
-let pos = vec3(0, 0, 2);
-let target = vec3(2, 2, 0);
-let up = vec3(0, 0, 1);
+		context.beginPath();
+		context.arc(0.45 * width, 0.7 * height, 0.1 * width, 0, 2 * Math.PI);
+		context.fill();
+	});
 
-let canvas = engine.canvas;
-let projection = mat4.perspective(Math.PI / 4, canvas.width / canvas.height, 0.1, 1000.0);
+	const vertexShader = getFile('/engine/shaders/simple.vshader');
+	const fragmentShader = getFile('/engine/shaders/simple.fshader');
 
-engine.setViewport(0, 0, canvas.width, canvas.height);
-engine.setBlendMode(BlendMode.SOLID);
-engine.setProgram(program, {
-	uProjection: projection.toArray(),
+	console.log(fragmentShader);
 
-	uTexture: { texture: texture },
-	uColorLight1: [1, 1, 1],
-	uPosLight2: [0, 0, 0],
-	uColorLight2: [0, 0, 0],
-	uLuminosity: 0,
-	uAmbient: [0, 0, 0]
-});
+	const program = engine.createProgram(vertexShader, fragmentShader, 'simple');
+
+	const sx = 40;
+	const sy = 40;
+
+	let up = vec3(0, 0, 1);
+
+	let canvas = engine.canvas;
+	let projection = mat4.perspective(Math.PI / 4, canvas.width / canvas.height, 0.1, 1000.0);
+
+	engine.setViewport(0, 0, canvas.width, canvas.height);
+	engine.setProgram(program, {
+		uProjection: projection.toArray(),
+
+		uColorLight1: [1, 1, 1],
+		uPosLight2: [0, 0, 0],
+		uColorLight2: [0, 0, 0],
+		uLuminosity: 0,
+		uAmbient: [0, 0, 0]
+	});
 
 // ================================================================================
 // STATE
 // ================================================================================
-let grid = createRandomGrid(sx, sy, 0);
-let geometry = createTerrainGeometry(grid, 1);
-let mesh = Mesh.make(geometry);
+	let grid = createRandomGrid(sx, sy, 0);
+	let geometry = createTerrainGeometry(grid, 1);
+	let mesh = Mesh.make(geometry);
 
-let keyState = {};
+	let playerMesh = Mesh.make(Geometry.createQuadData());
+
+	let keyState = {};
+	let pos = vec3(0, 0, 1.5);
+	let target = vec3(2, 2, 0);
 
 // ================================================================================
 // RENDER
@@ -77,12 +97,33 @@ let keyState = {};
 			uPosLight1: pos.toArray(),
 
 			uColor: [sin * sin, 0.7, 0.4, 1],
+			uTexture: { texture: texture },
 
 			uWorld: world.toArray(),
 			uWorldIT: worldIT.toArray()
 		});
 
+		engine.setBlendMode(BlendMode.SOLID);
+
 		Mesh.render(program, mesh);
+
+		world = mat4()
+			.translate(target.clone().add(vec3(0, 0, 0.18)))
+			.rotate(0.5 * Math.PI, vec3(1, 0, 0))
+			.rotate(-0.25 * Math.PI, vec3(0, 1, 0))
+			.scale(vec3(0.5, 0.5, 0.5));
+		worldIT = world.clone().invert().transpose();
+		engine.setProgramParameters(program.activeUniforms, {
+			uColor: [1, 1, 1, 1],
+			uTexture: { texture: playerTexture },
+
+			uWorld: world.toArray(),
+			uWorldIT: worldIT.toArray()
+		});
+
+		engine.setBlendMode(BlendMode.ALPHA);
+
+		Mesh.render(program, playerMesh);
 	});
 
 // ================================================================================
@@ -134,6 +175,17 @@ let keyState = {};
 // ================================================================================
 // HELPERS
 // ================================================================================
+
+function createTexture(engine, width, height, draw) {
+	let canvas = document.createElement('canvas');
+	canvas.width = width;
+	canvas.height = height;
+	let context = canvas.getContext('2d');
+
+	draw(context, width, height);
+
+	return engine.createTexture(canvas);
+}
 
 function createRandomGrid(sx, sy, t) {
 	let cells = new Array(sx * sy);
@@ -214,6 +266,7 @@ function writeVertex(x, y, z, nx, ny, nz, tu, tv, vertices, offset) {
 function getFile(url) {
     var req = new XMLHttpRequest();
     req.open("GET", url, false); // 'false': synchronous.
+    req.setRequestHeader('Cache-Control', 'no-cache');
     req.send(null);
     return req.responseText;
 }
