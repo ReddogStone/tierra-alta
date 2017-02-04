@@ -13,14 +13,6 @@ module.exports = function(engine, setRender) {
 
 	const Mesh = engine.Mesh = MeshLib(engine);
 
-	const texture = createTexture(engine, 128, 128, function(context, width, height) {
-		context.fillStyle = 'white';
-		context.fillRect(0, 0, width, height);
-		context.fillStyle = 'black';
-		context.fillRect(0.5 * width, 0, 0.3 * width, 0.3 * height);
-		context.fillRect(0, 0.5 * height, 0.25 * width, 0.25 * height);	
-	});
-
 	const playerTexture = createTexture(engine, 128, 128, function(context, width, height) {
 		context.fillStyle = 'silver';
 		context.beginPath();
@@ -41,6 +33,7 @@ module.exports = function(engine, setRender) {
 		context.fill();
 	});
 
+	const groundTexture = engine.createTextureFromFile('assets/textures/ground.png');
 	const stoneTexture = engine.createTextureFromFile('assets/textures/rock.png');
 	const orbTexture = engine.createTextureFromFile('assets/textures/orb.png');
 
@@ -61,7 +54,7 @@ module.exports = function(engine, setRender) {
 	engine.setProgram(program, {
 		uProjection: projection.toArray(),
 
-		uColorLight1: [1, 1, 1],
+		uColorLight1: [0.5, 0.5, 0.5],
 		uPosLight2: [0, 0, 0],
 		uColorLight2: [0, 0, 0],
 		uLuminosity: 0,
@@ -79,8 +72,8 @@ module.exports = function(engine, setRender) {
 	let mesh = Mesh.make(geometry);
 
 	let keyState = {};
-	let pos = vec3(0, 0, 1.5);
-	let target = vec3(2, 2, 0);
+	let pos = vec3(0, 0, 2);
+	let target = vec3(3, 3, 0);
 
 	let stones = [];
 	let orbs = [];
@@ -103,7 +96,8 @@ module.exports = function(engine, setRender) {
 			uPosLight1: pos.toArray(),
 
 			uColor: [sin * sin, 0.7, 0.4, 1],
-			uTexture: { texture: texture },
+			uLuminosity: 0.5,
+			uTexture: { texture: groundTexture },
 
 			uWorld: world.toArray(),
 			uWorldIT: worldIT.toArray()
@@ -129,13 +123,14 @@ module.exports = function(engine, setRender) {
 				return {
 					texture: orbTexture,
 					position: orb.position.clone().sub(vec3(0, 0, 0.07)),
-					scale: orb.scale
+					scale: orb.scale,
+					color: [1, 1, 1, orb.alpha]
 				};
 			})
 		);
 
 		sprites.sort(byDistanceTo(pos)).forEach(function(sprite) {
-			renderSprite(program, sprite.texture, sprite.position, sprite.scale);
+			renderSprite(program, sprite.texture, sprite.position, sprite.scale, sprite.color);
 		});
 	});
 
@@ -156,23 +151,36 @@ module.exports = function(engine, setRender) {
 
 	const orbBehavior = (stone) => {
 		let orb = {
-			position: stone.position.clone().add(vec3(0, 0, 0.7)),
-			scale: vec3(0.25, 0.25, 1)
+			position: stone.position.clone(),
+			scale: vec3(0.25, 0.25, 1),
+			alpha: 0
 		};
 		orbs.push(orb);
 
-		let t = 0;
 		return Behavior.run(function*() {
-			yield Behavior.update(function(dt) {
-				t += dt;
-				let sin = Math.sin(3 * t);
-				orb.position = stone.position.clone().add(vec3(0, 0, 0.7 + sin * sin * 0.1));
-
-				let playerDistance = orb.position.clone().sub(target).length();
-				if (playerDistance < 1.5) {
-					return true;
-				}
+			let from = stone.position.clone();
+			let pos = from.clone().add(vec3(0, 0, 0.7));
+			yield Behavior.interval(1, function(progress) {
+				orb.position = from.clone().lerp(pos, 1.0 - Math.pow(2, -10 * progress));
+				orb.alpha = progress;
 			});
+
+			yield Behavior.first(
+				Behavior.run(function*() {
+					while (true) {
+						let amplitude = 0.1;
+						yield Behavior.interval(1.5, function(progress) {
+							let sin = Math.sin(Math.PI * progress);
+							orb.position = stone.position.clone().add(vec3(0, 0, 0.7 + sin * sin * amplitude));
+						});
+						// yield Behavior.wait(2);
+					}
+				}),
+				Behavior.update(function(dt) {
+					let playerDistance = orb.position.clone().sub(target).length();
+					if (playerDistance < 1.5) { return true; }
+				})
+			);
 
 			let start = orb.position.clone();
 			yield Behavior.interval(0.75, function(progress) {
@@ -238,7 +246,7 @@ module.exports = function(engine, setRender) {
 			}
 			dir.normalize();
 
-			let dp = dir.clone().scale(dt);
+			let dp = dir.clone().scale(2 * dt);
 			pos.add(dp);
 			target.add(dp);
 		})
@@ -258,10 +266,11 @@ const byDistanceTo = target => (object1, object2) => {
 	return 0;
 };
 
-const makeRenderSprite = (Engine, quadMesh) => (program, texture, position, scale) => {
+const makeRenderSprite = (Engine, quadMesh) => (program, texture, position, scale, color) => {
 	scale = scale || vec3(1, 1, 1);
+	color = color || [1, 1, 1, 1];
 
-	Engine.setBlendMode(BlendMode.ALPHA);
+	Engine.setBlendMode(BlendMode.PREMUL_ALPHA);
 
 	let world = mat4()
 		.translate(position)
@@ -271,7 +280,7 @@ const makeRenderSprite = (Engine, quadMesh) => (program, texture, position, scal
 		.translate(vec3(0, 0.5, 0));
 	let worldIT = world.clone().invert().transpose();
 	Engine.setProgramParameters(program.activeUniforms, {
-		uColor: [1, 1, 1, 1],
+		uColor: color,
 		uTexture: { texture: texture },
 
 		uWorld: world.toArray(),
