@@ -7,10 +7,11 @@ const mat4 = require('../../engine/math/Matrix4');
 const vec3 = require('../../engine/math/Vector3');
 
 const Behavior = require('../logic/behavior');
+const BehaviorSystem = require('../logic/behavior-system');
 
 module.exports = function(engine, setRender) {
 
-	const Mesh = MeshLib(engine);
+	const Mesh = engine.Mesh = MeshLib(engine);
 
 	const texture = createTexture(engine, 128, 128, function(context, width, height) {
 		context.fillStyle = 'white';
@@ -40,10 +41,11 @@ module.exports = function(engine, setRender) {
 		context.fill();
 	});
 
+	const stoneTexture = engine.createTextureFromFile('assets/textures/rock.png');
+	const orbTexture = engine.createTextureFromFile('assets/textures/orb.png');
+
 	const vertexShader = getFile('/engine/shaders/simple.vshader');
 	const fragmentShader = getFile('/engine/shaders/simple.fshader');
-
-	console.log(fragmentShader);
 
 	const program = engine.createProgram(vertexShader, fragmentShader, 'simple');
 
@@ -66,6 +68,9 @@ module.exports = function(engine, setRender) {
 		uAmbient: [0, 0, 0]
 	});
 
+	let quadMesh = Mesh.make(Geometry.createQuadData());
+	let renderSprite = makeRenderSprite(engine, quadMesh);
+
 // ================================================================================
 // STATE
 // ================================================================================
@@ -73,11 +78,12 @@ module.exports = function(engine, setRender) {
 	let geometry = createTerrainGeometry(grid, 1);
 	let mesh = Mesh.make(geometry);
 
-	let playerMesh = Mesh.make(Geometry.createQuadData());
-
 	let keyState = {};
 	let pos = vec3(0, 0, 1.5);
 	let target = vec3(2, 2, 0);
+
+	let stones = [];
+	let orbs = [];
 
 // ================================================================================
 // RENDER
@@ -107,28 +113,36 @@ module.exports = function(engine, setRender) {
 
 		Mesh.render(program, mesh);
 
-		world = mat4()
-			.translate(target.clone().add(vec3(0, 0, 0.18)))
-			.rotate(0.5 * Math.PI, vec3(1, 0, 0))
-			.rotate(-0.25 * Math.PI, vec3(0, 1, 0))
-			.scale(vec3(0.5, 0.5, 0.5));
-		worldIT = world.clone().invert().transpose();
-		engine.setProgramParameters(program.activeUniforms, {
-			uColor: [1, 1, 1, 1],
-			uTexture: { texture: playerTexture },
+		let sprites = [{
+			texture: playerTexture,
+			position: target.clone().sub(vec3(0, 0, 0.07)),
+			scale: vec3(0.5, 0.5, 1)
+		}].concat(
+			stones.map(function(stone) {
+				return {
+					texture: stoneTexture,
+					position: stone.position.clone().sub(vec3(0, 0, 0.07)),
+					scale: stone.scale
+				};
+			}),
+			orbs.map(function(orb) {
+				return {
+					texture: orbTexture,
+					position: orb.position.clone().sub(vec3(0, 0, 0.07)),
+					scale: orb.scale
+				};
+			})
+		);
 
-			uWorld: world.toArray(),
-			uWorldIT: worldIT.toArray()
+		sprites.sort(byDistanceTo(pos)).forEach(function(sprite) {
+			renderSprite(program, sprite.texture, sprite.position, sprite.scale);
 		});
-
-		engine.setBlendMode(BlendMode.ALPHA);
-
-		Mesh.render(program, playerMesh);
 	});
 
 // ================================================================================
 // LOGIC
 // ================================================================================
+	const behaviorSystem = BehaviorSystem();
 
 	const storeKeyState = (keyCode, property) => () => Behavior.run(function*() {
 		yield Behavior.filter(event =>
@@ -140,12 +154,71 @@ module.exports = function(engine, setRender) {
 		keyState[property] = false;
 	});
 
+	const orbBehavior = (stone) => {
+		let orb = {
+			position: stone.position.clone().add(vec3(0, 0, 0.7)),
+			scale: vec3(0.25, 0.25, 1)
+		};
+		orbs.push(orb);
+
+		let t = 0;
+		return Behavior.run(function*() {
+			yield Behavior.update(function(dt) {
+				t += dt;
+				let sin = Math.sin(3 * t);
+				orb.position = stone.position.clone().add(vec3(0, 0, 0.7 + sin * sin * 0.1));
+
+				let playerDistance = orb.position.clone().sub(target).length();
+				if (playerDistance < 1.5) {
+					return true;
+				}
+			});
+
+			let start = orb.position.clone();
+			yield Behavior.interval(0.75, function(progress) {
+				orb.position = start.clone().lerp(target, Math.pow(progress, 3));
+			});
+
+			orbs.splice(orbs.indexOf(orb), 1);
+			stone.saturated = false;
+		});
+	};
+
+	const stoneBehavior = (position, interval) => {
+		let stone = {
+			position: position.clone(),
+			saturated: false
+		};
+		stones.push(stone);
+
+		return Behavior.repeat(() => Behavior.run(function*() {
+			yield Behavior.wait(interval);
+
+			stone.saturated = true;
+			behaviorSystem.add(orbBehavior(stone));
+
+			yield Behavior.update(function() {
+				if (!stone.saturated) { return true; }
+			});
+		}));
+	};
+
+	for (let i = 0; i < 20; i++) {
+		behaviorSystem.add(stoneBehavior(vec3(Math.random() * 20, Math.random() * 20, 0), 10));
+	}
+
 	let t = 0;
 	return Behavior.first(
 		Behavior.repeat(storeKeyState(37, 'left')),
 		Behavior.repeat(storeKeyState(38, 'up')),
 		Behavior.repeat(storeKeyState(39, 'right')),
 		Behavior.repeat(storeKeyState(40, 'down')),
+
+		function(event) {
+			behaviorSystem.update(event);
+			return { done: false };
+		},
+
 		Behavior.update(function(dt) {
 			t += dt;
 			// pos = vec3(Math.sin(t + 0.5) * 20, Math.cos(0.3 * t) * 10, 10);
@@ -175,6 +248,38 @@ module.exports = function(engine, setRender) {
 // ================================================================================
 // HELPERS
 // ================================================================================
+
+const byDistanceTo = target => (object1, object2) => {
+	let d1 = object1.position.clone().sub(target).length();
+	let d2 = object2.position.clone().sub(target).length();
+
+	if (d1 < d2) { return 1; }
+	if (d1 > d2) { return -1; }
+	return 0;
+};
+
+const makeRenderSprite = (Engine, quadMesh) => (program, texture, position, scale) => {
+	scale = scale || vec3(1, 1, 1);
+
+	Engine.setBlendMode(BlendMode.ALPHA);
+
+	let world = mat4()
+		.translate(position)
+		.rotate(-0.25 * Math.PI, vec3(0, 0, 1))
+		.rotate(0.4 * Math.PI, vec3(1, 0, 0))
+		.scale(scale)
+		.translate(vec3(0, 0.5, 0));
+	let worldIT = world.clone().invert().transpose();
+	Engine.setProgramParameters(program.activeUniforms, {
+		uColor: [1, 1, 1, 1],
+		uTexture: { texture: texture },
+
+		uWorld: world.toArray(),
+		uWorldIT: worldIT.toArray()
+	});
+
+	Engine.Mesh.render(program, quadMesh);
+}
 
 function createTexture(engine, width, height, draw) {
 	let canvas = document.createElement('canvas');
