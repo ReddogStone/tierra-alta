@@ -18,10 +18,16 @@ module.exports = function(engine, setRender) {
 	const stoneTexture = engine.createTextureFromFile('assets/textures/rock.png');
 	const orbTexture = engine.createTextureFromFile('assets/textures/orb.png');
 
-	const vertexShader = getFile('/engine/shaders/simple.vshader');
-	const fragmentShader = getFile('/engine/shaders/simple.fshader');
-
-	const program = engine.createProgram(vertexShader, fragmentShader, 'simple');
+	const simpleProgram = engine.createProgram(
+		getFile('/engine/shaders/simple.vshader'),
+		getFile('/engine/shaders/simple.fshader'),
+		'simple'
+	);
+	const screenspaceProgram = engine.createProgram(
+		getFile('/engine/shaders/screenspace.vshader'),
+		getFile('/engine/shaders/screenspace.fshader'),
+		'screenspace'
+	);
 
 	const sx = 40;
 	const sy = 40;
@@ -32,18 +38,12 @@ module.exports = function(engine, setRender) {
 	let projection = mat4.perspective(Math.PI / 4, canvas.width / canvas.height, 0.1, 1000.0);
 
 	engine.setViewport(0, 0, canvas.width, canvas.height);
-	engine.setProgram(program, {
-		uProjection: projection.toArray(),
-
-		uColorLight1: [0.5, 0.5, 0.5],
-		uPosLight2: [0, 0, 0],
-		uColorLight2: [0, 0, 0],
-		uLuminosity: 0,
-		uAmbient: [0, 0, 0]
-	});
 
 	let quadMesh = Mesh.make(Geometry.createQuadData());
 	let renderSprite = makeRenderSprite(engine, quadMesh);
+	let renderScreenSprite = makeRenderScreenSprite(engine);
+
+	let textSprite = createTextSprite(engine, 'Testitest', 'Georgia', 40);
 
 // ================================================================================
 // STATE
@@ -75,7 +75,16 @@ module.exports = function(engine, setRender) {
 
 		let world = mat4();
 		let worldIT = world.clone().invert().transpose();
-		engine.setProgramParameters(program.activeUniforms, {
+
+		engine.setProgram(simpleProgram, {
+			uProjection: projection.toArray(),
+
+			uColorLight1: [0.5, 0.5, 0.5],
+			uPosLight2: [0, 0, 0],
+			uColorLight2: [0, 0, 0],
+			uLuminosity: 0,
+			uAmbient: [0, 0, 0],
+
 			uView: view.toArray(),
 
 			uPosCamera: pos.toArray(),
@@ -91,7 +100,7 @@ module.exports = function(engine, setRender) {
 
 		engine.setBlendMode(BlendMode.SOLID);
 
-		Mesh.render(program, mesh);
+		Mesh.render(simpleProgram, mesh);
 
 		let sprites = [{
 			texture: playerTexture,
@@ -119,8 +128,10 @@ module.exports = function(engine, setRender) {
 		);
 
 		sprites.sort(byDistanceTo(pos)).forEach(function(sprite) {
-			renderSprite(program, sprite.texture, sprite.position, sprite.rotation, sprite.scale, sprite.color, sprite.luminosity);
+			renderSprite(simpleProgram, sprite.texture, sprite.position, sprite.rotation, sprite.scale, sprite.color, sprite.luminosity);
 		});
+
+		renderScreenSprite(screenspaceProgram, textSprite.mesh, textSprite.texture, vec3(40, canvas.height - 80, 0), [0.8, 0.7, 0.4, 1]);
 	});
 
 // ================================================================================
@@ -270,6 +281,82 @@ const byDistanceTo = target => (object1, object2) => {
 	if (d1 > d2) { return -1; }
 	return 0;
 };
+
+const makeRenderScreenSprite = Engine => (program, mesh, texture, position, color) => {
+	color = color || [1, 1, 1, 1];
+
+	Engine.setBlendMode(BlendMode.PREMUL_ALPHA);
+
+	let screenSize = Engine.getDrawingBufferSize();
+
+	let world = mat4().translate(position);
+	Engine.setProgram(program, {
+		uColor: color,
+		uTexture: { texture: texture },
+
+		uWorld: world.toArray(),
+		uScreenSize: [screenSize.x, screenSize.y]
+	});
+
+	Engine.Mesh.render(program, mesh);
+}
+
+function nextPowerOf2(value) {
+	--value;
+	value = (value >> 1) | value;
+	value = (value >> 2) | value;
+	value = (value >> 4) | value;
+	value = (value >> 8) | value;
+	value = (value >> 16) | value;
+	return ++value;
+}
+
+const textCanvas = document.createElement('canvas');
+function createTextSprite(Engine, text, family, height, weight, style) {
+	weight = weight || 100;
+	style = style || 'normal';
+
+	let fontString = `${style} ${weight} ${height}px ${family}`;
+
+	let context = textCanvas.getContext('2d');
+	context.font = fontString;
+	let textWidth = context.measureText(text).width + 2;
+	let textHeight = height;
+
+	textCanvas.width = nextPowerOf2(textWidth);
+	textCanvas.height = nextPowerOf2(textHeight);
+
+	let su = textWidth / textCanvas.width;
+	let sv = textHeight / textCanvas.height;
+	let geometry = {
+		"vertices": [
+			//x, y, z, tu, tv
+			0.0, 0.0, 0.0, 0.0, sv,
+			textWidth, 0.0, 0.0, su,  sv,
+			0.0, textHeight, 0.0, 0.0, 0.0,
+			textWidth, textHeight, 0.0, su, 0.0],
+		"indices": [0, 1, 2, 2, 1, 3],
+		"description": {
+			"aPosition": { "components": 3, "type": "FLOAT", "normalized": false },
+			"aTexCoord": { "components": 2, "type": "FLOAT", "normalized": false }
+		}
+	};
+	let mesh = Engine.Mesh.make(geometry);
+
+	context.clearRect(0, 0, textCanvas.width, textCanvas.height);
+	context.font = fontString;
+	context.fillStyle = 'white';
+	context.textAlign = 'start';
+	var sy = height;
+	context.fillText(text, 0, sy);
+
+	let texture = Engine.createTexture(textCanvas);
+
+	return {
+		mesh: mesh,
+		texture: texture
+	};
+}
 
 const makeRenderSprite = (Engine, quadMesh) => (program, texture, position, rotation, scale, color, luminosity) => {
 	rotation = rotation || 0;
