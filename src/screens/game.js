@@ -13,26 +13,7 @@ module.exports = function(engine, setRender) {
 
 	const Mesh = engine.Mesh = MeshLib(engine);
 
-	const playerTexture = createTexture(engine, 128, 128, function(context, width, height) {
-		context.fillStyle = 'silver';
-		context.beginPath();
-		context.arc(0.5 * width, 0.5 * height, 0.4 * width, 0, 2 * Math.PI);
-		context.fill();
-
-		context.fillStyle = 'black';
-		context.beginPath();
-		context.arc(0.3 * width, 0.4 * height, 0.08 * width, 0, 2 * Math.PI);
-		context.fill();
-
-		context.beginPath();
-		context.arc(0.7 * width, 0.4 * height, 0.08 * width, 0, 2 * Math.PI);
-		context.fill();
-
-		context.beginPath();
-		context.arc(0.45 * width, 0.7 * height, 0.1 * width, 0, 2 * Math.PI);
-		context.fill();
-	});
-
+	const playerTexture = engine.createTextureFromFile('assets/textures/spirit.png');
 	const groundTexture = engine.createTextureFromFile('assets/textures/ground.png');
 	const stoneTexture = engine.createTextureFromFile('assets/textures/rock.png');
 	const orbTexture = engine.createTextureFromFile('assets/textures/orb.png');
@@ -75,6 +56,11 @@ module.exports = function(engine, setRender) {
 	let pos = vec3(0, 0, 2);
 	let target = vec3(3, 3, 0);
 
+	let player = {
+		rotation: 0,
+		scale: vec3(0.5, 0.5, 1),
+		color: [0, 0.7, 1, 1]
+	};
 	let stones = [];
 	let orbs = [];
 
@@ -109,8 +95,10 @@ module.exports = function(engine, setRender) {
 
 		let sprites = [{
 			texture: playerTexture,
-			position: target.clone().sub(vec3(0, 0, 0.07)),
-			scale: vec3(0.5, 0.5, 1)
+			position: target.clone().sub(vec3(0, 0, 0.0)),
+			rotation: player.rotation,
+			scale: player.scale,
+			color: player.color
 		}].concat(
 			stones.map(function(stone) {
 				return {
@@ -124,13 +112,14 @@ module.exports = function(engine, setRender) {
 					texture: orbTexture,
 					position: orb.position.clone().sub(vec3(0, 0, 0.07)),
 					scale: orb.scale,
-					color: [1, 1, 1, orb.alpha]
+					color: orb.color.concat(orb.alpha),
+					luminosity: orb.luminosity
 				};
 			})
 		);
 
 		sprites.sort(byDistanceTo(pos)).forEach(function(sprite) {
-			renderSprite(program, sprite.texture, sprite.position, sprite.scale, sprite.color);
+			renderSprite(program, sprite.texture, sprite.position, sprite.rotation, sprite.scale, sprite.color, sprite.luminosity);
 		});
 	});
 
@@ -149,16 +138,18 @@ module.exports = function(engine, setRender) {
 		keyState[property] = false;
 	});
 
-	const orbBehavior = (stone) => {
+	const orbBehavior = (creator, color) => {
 		let orb = {
-			position: stone.position.clone(),
+			position: creator.position.clone(),
 			scale: vec3(0.25, 0.25, 1),
+			color: color,
+			luminosity: 0.5,
 			alpha: 0
 		};
 		orbs.push(orb);
 
 		return Behavior.run(function*() {
-			let from = stone.position.clone();
+			let from = creator.position.clone();
 			let pos = from.clone().add(vec3(0, 0, 0.7));
 			yield Behavior.interval(1, function(progress) {
 				orb.position = from.clone().lerp(pos, 1.0 - Math.pow(2, -10 * progress));
@@ -171,7 +162,7 @@ module.exports = function(engine, setRender) {
 						let amplitude = 0.1;
 						yield Behavior.interval(1.5, function(progress) {
 							let sin = Math.sin(Math.PI * progress);
-							orb.position = stone.position.clone().add(vec3(0, 0, 0.7 + sin * sin * amplitude));
+							orb.position = creator.position.clone().add(vec3(0, 0, 0.7 + sin * sin * amplitude));
 						});
 						// yield Behavior.wait(2);
 					}
@@ -188,7 +179,6 @@ module.exports = function(engine, setRender) {
 			});
 
 			orbs.splice(orbs.indexOf(orb), 1);
-			stone.saturated = false;
 		});
 	};
 
@@ -203,7 +193,10 @@ module.exports = function(engine, setRender) {
 			yield Behavior.wait(interval);
 
 			stone.saturated = true;
-			behaviorSystem.add(orbBehavior(stone));
+			behaviorSystem.add(Behavior.run(function*() {
+				yield orbBehavior(stone, [0.86, 0.61, 0.4]);
+				stone.saturated = false;
+			}));
 
 			yield Behavior.update(function() {
 				if (!stone.saturated) { return true; }
@@ -212,10 +205,11 @@ module.exports = function(engine, setRender) {
 	};
 
 	for (let i = 0; i < 20; i++) {
-		behaviorSystem.add(stoneBehavior(vec3(Math.random() * 20, Math.random() * 20, 0), 10));
+		behaviorSystem.add(stoneBehavior(vec3(Math.random() * 20, Math.random() * 20, 0), 1));
 	}
 
 	let t = 0;
+	let moveT = 0;
 	return Behavior.first(
 		Behavior.repeat(storeKeyState(37, 'left')),
 		Behavior.repeat(storeKeyState(38, 'up')),
@@ -246,9 +240,20 @@ module.exports = function(engine, setRender) {
 			}
 			dir.normalize();
 
+			if (dir.length() > 0) {
+				moveT += dt;
+			}
+
 			let dp = dir.clone().scale(2 * dt);
 			pos.add(dp);
 			target.add(dp);
+
+			let sin = Math.sin(t * 0.3);
+			player.color[3] = 0.7 + sin * sin * 0.3;
+
+			let moveCos = Math.cos(5 * moveT);
+			player.scale = vec3(0.5, 0.5, 1).scale(0.95 + moveCos * moveCos * 0.05);
+			player.rotation = moveCos * 0.05;
 		})
 	);
 };
@@ -266,9 +271,11 @@ const byDistanceTo = target => (object1, object2) => {
 	return 0;
 };
 
-const makeRenderSprite = (Engine, quadMesh) => (program, texture, position, scale, color) => {
+const makeRenderSprite = (Engine, quadMesh) => (program, texture, position, rotation, scale, color, luminosity) => {
+	rotation = rotation || 0;
 	scale = scale || vec3(1, 1, 1);
 	color = color || [1, 1, 1, 1];
+	luminosity = (luminosity !== undefined) ? luminosity : 0.5;
 
 	Engine.setBlendMode(BlendMode.PREMUL_ALPHA);
 
@@ -276,11 +283,13 @@ const makeRenderSprite = (Engine, quadMesh) => (program, texture, position, scal
 		.translate(position)
 		.rotate(-0.25 * Math.PI, vec3(0, 0, 1))
 		.rotate(0.4 * Math.PI, vec3(1, 0, 0))
+		.rotate(rotation, vec3(0, 0, 1))
 		.scale(scale)
 		.translate(vec3(0, 0.5, 0));
 	let worldIT = world.clone().invert().transpose();
 	Engine.setProgramParameters(program.activeUniforms, {
 		uColor: color,
+		uLuminosity: luminosity,
 		uTexture: { texture: texture },
 
 		uWorld: world.toArray(),
